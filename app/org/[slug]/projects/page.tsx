@@ -1,13 +1,39 @@
 'use client'
 
 import { useParams } from 'next/navigation'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { Button } from '@/components/ui/button'
-import { Plus, FolderOpen } from 'lucide-react'
+import { Project } from '@/lib/projects'
+import { ProjectsList } from '@/components/dashboard/projects-list'
+import { CreateProjectDialog } from '@/components/dashboard/create-project-dialog'
+import useSWR from 'swr'
+
+const fetcher = (url: string) => fetch(url).then((res) => res.json())
 
 export default function ProjectsPage() {
   const params = useParams()
   const slug = params?.slug as string
+  const [orgId, setOrgId] = useState<string | null>(null)
+
+  // Get org ID from slug
+  useEffect(() => {
+    const fetchOrgId = async () => {
+      const supabase = (await import('@/lib/supabase/client')).createClient()
+      const { data } = await supabase
+        .from('organizations')
+        .select('id')
+        .eq('slug', slug)
+        .single()
+      if (data) setOrgId(data.id)
+    }
+    if (slug) fetchOrgId()
+  }, [slug])
+
+  // Fetch projects
+  const { data: projects, mutate, isLoading } = useSWR<Project[]>(
+    orgId ? `/api/projects?org_id=${orgId}` : null,
+    fetcher
+  )
 
   return (
     <div className="flex h-screen bg-gray-50">
@@ -51,57 +77,22 @@ export default function ProjectsPage() {
               <h2 className="text-3xl font-bold text-gray-900">Projects</h2>
               <p className="text-gray-600 mt-2">Manage your organization&apos;s projects</p>
             </div>
-            <Button className="bg-blue-600 hover:bg-blue-700 text-white" disabled>
-              <Plus className="mr-2" size={20} />
-              New Project (Phase 2)
-            </Button>
+            {orgId && <CreateProjectDialog orgId={orgId} onSuccess={() => mutate()} />}
           </div>
 
-          <div className="bg-white rounded-lg border border-gray-200 p-12 text-center">
-            <FolderOpen className="mx-auto mb-4 text-gray-400" size={48} />
-            <h3 className="text-2xl font-semibold text-gray-900 mb-2">No projects yet</h3>
-            <p className="text-gray-600 mb-6">
-              Projects and task management coming in Phase 2 of ProjectFlow.
-            </p>
-            <div className="flex gap-3 justify-center">
-              <Button variant="outline">View Roadmap</Button>
-              <Link href={`/org/${slug}`}>
-                <Button variant="outline">Back to Overview</Button>
-              </Link>
+          {isLoading ? (
+            <div className="text-center py-12">
+              <p className="text-gray-600">Loading projects...</p>
             </div>
-          </div>
-
-          <div className="mt-12 grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
-              <h4 className="font-semibold text-gray-900 mb-2">Phase 2 Features</h4>
-              <ul className="text-sm text-gray-700 space-y-2">
-                <li>✓ Create and manage projects</li>
-                <li>✓ Create tasks within projects</li>
-                <li>✓ Assign tasks to team members</li>
-                <li>✓ Set priorities and due dates</li>
-              </ul>
-            </div>
-
-            <div className="bg-green-50 border border-green-200 rounded-lg p-6">
-              <h4 className="font-semibold text-gray-900 mb-2">Phase 3 Features</h4>
-              <ul className="text-sm text-gray-700 space-y-2">
-                <li>✓ Comments on tasks</li>
-                <li>✓ Activity timeline</li>
-                <li>✓ Real-time updates</li>
-                <li>✓ Notifications</li>
-              </ul>
-            </div>
-
-            <div className="bg-purple-50 border border-purple-200 rounded-lg p-6">
-              <h4 className="font-semibold text-gray-900 mb-2">Future Features</h4>
-              <ul className="text-sm text-gray-700 space-y-2">
-                <li>✓ File uploads</li>
-                <li>✓ Custom roles</li>
-                <li>✓ Advanced search</li>
-                <li>✓ Webhooks & API</li>
-              </ul>
-            </div>
-          </div>
+          ) : (
+            projects && (
+              <ProjectsList
+                projects={projects}
+                orgSlug={slug}
+                onCreateClick={() => {}}
+              />
+            )
+          )}
         </div>
       </main>
     </div>
