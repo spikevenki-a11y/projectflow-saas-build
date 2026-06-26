@@ -4,8 +4,9 @@ import { useState } from 'react'
 import { Comment } from '@/lib/comments'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
+import { AttachmentsList } from './attachments-list'
 import { formatDistanceToNow } from 'date-fns'
-import { MessageCircle, Trash2 } from 'lucide-react'
+import { MessageCircle, Trash2, Loader2 } from 'lucide-react'
 
 interface CommentSectionProps {
   taskId: string
@@ -112,7 +113,11 @@ export function CommentSection({
                   </button>
                 </div>
 
-                <p className="text-gray-700 whitespace-pre-wrap">{comment.content}</p>
+                <p className="text-gray-700 whitespace-pre-wrap mb-3">{comment.content}</p>
+                
+                <div className="mt-3 pt-3 border-t border-gray-200">
+                  <AttachmentsList commentId={comment.id} />
+                </div>
               </div>
             ))}
           </div>
