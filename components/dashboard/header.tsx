@@ -1,7 +1,9 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import { NotificationBell } from './notification-bell'
 import { User } from 'lucide-react'
 
 interface Profile {
@@ -11,30 +13,46 @@ interface Profile {
 }
 
 export function Header() {
+  const params = useParams()
+  const slug = params?.slug as string
+  const [orgId, setOrgId] = useState<string | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
   const supabase = createClient()
 
   useEffect(() => {
-    const fetchProfile = async () => {
+    const fetchData = async () => {
       const {
         data: { user },
       } = await supabase.auth.getUser()
 
       if (user?.id) {
-        const { data } = await supabase
+        const { data: profileData } = await supabase
           .from('profiles')
           .select('first_name, last_name, avatar_url')
           .eq('id', user.id)
           .single()
 
-        if (data) {
-          setProfile(data)
+        if (profileData) {
+          setProfile(profileData)
+        }
+      }
+
+      // Get org ID from slug
+      if (slug) {
+        const { data: orgData } = await supabase
+          .from('organizations')
+          .select('id')
+          .eq('slug', slug)
+          .single()
+
+        if (orgData) {
+          setOrgId(orgData.id)
         }
       }
     }
 
-    fetchProfile()
-  }, [])
+    fetchData()
+  }, [slug])
 
   const displayName = profile
     ? `${profile.first_name || ''} ${profile.last_name || ''}`.trim() || 'User'
@@ -45,6 +63,7 @@ export function Header() {
       <div className="flex items-center justify-between">
         <div></div>
         <div className="flex items-center gap-4">
+          {orgId && <NotificationBell orgId={orgId} />}
           <div className="flex items-center gap-3">
             {profile?.avatar_url ? (
               <img
