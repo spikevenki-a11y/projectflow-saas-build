@@ -1,4 +1,4 @@
-import { createClient } from '@/lib/supabase/client'
+import { queryRows } from '@/lib/db'
 import { Task } from '@/lib/tasks'
 
 export interface SearchResult {
@@ -20,48 +20,56 @@ export async function searchTasks(
     assignedTo?: string
   }
 ): Promise<SearchResult> {
-  const supabase = createClient()
   const limit = options?.limit || 10
   const offset = options?.offset || 0
 
-  let queryBuilder = supabase
-    .from('tasks')
-    .select('*', { count: 'exact' })
-    .eq('org_id', orgId)
+  let whereClause = 'org_id = $1'
+  const params: unknown[] = [orgId]
+  let paramIndex = 2
 
   // Full-text search
   if (query && query.length > 2) {
-    queryBuilder = queryBuilder.textSearch('search_text', query, {
-      type: 'websearch',
-      config: 'english',
-    })
+    whereClause += ` AND search_text @@ plainto_tsquery($${paramIndex})`
+    params.push(query)
+    paramIndex++
   }
 
   // Apply filters
   if (options?.status) {
-    queryBuilder = queryBuilder.eq('status', options.status)
+    whereClause += ` AND status = $${paramIndex}`
+    params.push(options.status)
+    paramIndex++
   }
 
   if (options?.priority) {
-    queryBuilder = queryBuilder.eq('priority', options.priority)
+    whereClause += ` AND priority = $${paramIndex}`
+    params.push(options.priority)
+    paramIndex++
   }
 
   if (options?.assignedTo) {
-    queryBuilder = queryBuilder.eq('assigned_to', options.assignedTo)
+    whereClause += ` AND assigned_to = $${paramIndex}`
+    params.push(options.assignedTo)
+    paramIndex++
   }
 
-  // Pagination
-  queryBuilder = queryBuilder
-    .range(offset, offset + limit - 1)
-    .order('updated_at', { ascending: false })
+  const data = await queryRows(
+    `SELECT * FROM tasks 
+     WHERE ${whereClause}
+     ORDER BY updated_at DESC
+     LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
+    [...params, limit, offset]
+  )
 
-  const { data, count, error } = await queryBuilder
-
-  if (error) throw error
+  // Get total count
+  const countResult = await queryRows(
+    `SELECT COUNT(*) as total FROM tasks WHERE ${whereClause}`,
+    params
+  )
 
   return {
     tasks: (data || []) as Task[],
-    total: count || 0,
+    total: countResult[0]?.total || 0,
   }
 }
 
@@ -73,21 +81,17 @@ export async function getTaskSuggestions(
   query: string,
   limit: number = 5
 ): Promise<Array<{ id: string; title: string }>> {
-  const supabase = createClient()
-
   if (!query || query.length < 2) {
     return []
   }
 
-  const { data, error } = await supabase
-    .from('tasks')
-    .select('id, title')
-    .eq('org_id', orgId)
-    .ilike('title', `%${query}%`)
-    .limit(limit)
-    .order('created_at', { ascending: false })
-
-  if (error) throw error
+  const data = await queryRows(
+    `SELECT id, title FROM tasks 
+     WHERE org_id = $1 AND title ILIKE $2
+     ORDER BY created_at DESC
+     LIMIT $3`,
+    [orgId, `%${query}%`, limit]
+  )
 
   return data || []
 }
@@ -99,17 +103,13 @@ export async function getPopularSearches(
   orgId: string,
   limit: number = 5
 ): Promise<string[]> {
-  const supabase = createClient()
+  const data = await queryRows(
+    `SELECT title FROM tasks 
+     WHERE org_id = $1
+     ORDER BY created_at DESC
+     LIMIT $2`,
+    [orgId, limit]
+  )
 
-  // This is a simplified version - in production you might want to track search terms
-  const { data, error } = await supabase
-    .from('tasks')
-    .select('title')
-    .eq('org_id', orgId)
-    .order('created_at', { ascending: false })
-    .limit(limit)
-
-  if (error) throw error
-
-  return data?.map((task) => task.title) || []
+  return data?.map((task: any) => task.title) || []
 }

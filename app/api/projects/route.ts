@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createProject, getProjects } from '@/lib/projects'
+import { queryOne } from '@/lib/db'
 
 export async function GET(request: NextRequest) {
   try {
@@ -22,12 +23,10 @@ export async function GET(request: NextRequest) {
     }
 
     // Verify user is member of org
-    const { data: membership } = await supabase
-      .from('organization_members')
-      .select('id')
-      .eq('org_id', orgId)
-      .eq('user_id', user.id)
-      .single()
+    const membership = await queryOne(
+      `SELECT id FROM organization_members WHERE org_id = $1 AND user_id = $2`,
+      [orgId, user.id]
+    )
 
     if (!membership) {
       return NextResponse.json(
@@ -69,12 +68,10 @@ export async function POST(request: NextRequest) {
     }
 
     // Verify user is member of org
-    const { data: membership } = await supabase
-      .from('organization_members')
-      .select('id')
-      .eq('org_id', org_id)
-      .eq('user_id', user.id)
-      .single()
+    const membership = await queryOne(
+      `SELECT id FROM organization_members WHERE org_id = $1 AND user_id = $2`,
+      [org_id, user.id]
+    )
 
     if (!membership) {
       return NextResponse.json(

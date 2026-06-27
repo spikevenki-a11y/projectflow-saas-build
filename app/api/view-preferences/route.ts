@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { saveViewPreference, getViewPreference } from '@/lib/view-preferences'
 import { createClient } from '@/lib/supabase/server'
+import { queryOne } from '@/lib/db'
 
 export async function GET(request: NextRequest) {
   try {
@@ -18,14 +19,12 @@ export async function GET(request: NextRequest) {
     const projectId = searchParams.get('projectId')
 
     // Get user's organization
-    const { data: orgData, error: orgError } = await supabase
-      .from('organization_members')
-      .select('org_id')
-      .eq('user_id', user.id)
-      .limit(1)
-      .single()
+    const orgData = await queryOne(
+      `SELECT org_id FROM organization_members WHERE user_id = $1 LIMIT 1`,
+      [user.id]
+    )
 
-    if (orgError || !orgData) {
+    if (!orgData) {
       return NextResponse.json(
         { error: 'No organization found' },
         { status: 404 }
@@ -54,14 +53,12 @@ export async function POST(request: NextRequest) {
     }
 
     // Get user's organization
-    const { data: orgData, error: orgError } = await supabase
-      .from('organization_members')
-      .select('org_id')
-      .eq('user_id', user.id)
-      .limit(1)
-      .single()
+    const orgData = await queryOne(
+      `SELECT org_id FROM organization_members WHERE user_id = $1 LIMIT 1`,
+      [user.id]
+    )
 
-    if (orgError || !orgData) {
+    if (!orgData) {
       return NextResponse.json(
         { error: 'No organization found' },
         { status: 404 }

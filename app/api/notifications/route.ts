@@ -1,5 +1,13 @@
 import { createClient } from '@/lib/supabase/server'
 import { NextRequest, NextResponse } from 'next/server'
+import {
+  getUserNotifications,
+  getUnreadNotificationCount,
+  markNotificationAsRead,
+  markAllNotificationsAsRead,
+  deleteNotification,
+} from '@/lib/notifications'
+import { queryRows } from '@/lib/db'
 
 export async function GET(req: NextRequest) {
   try {
@@ -23,24 +31,22 @@ export async function GET(req: NextRequest) {
       )
     }
 
-    let query = supabase
-      .from('notifications')
-      .select(`
-        *,
-        actor:actor_id(id, first_name, last_name, avatar_url)
-      `)
-      .eq('user_id', user.id)
-      .eq('org_id', orgId)
+    let where = `user_id = $1 AND org_id = $2`
+    const params: unknown[] = [user.id, orgId]
 
     if (unreadOnly) {
-      query = query.is('read_at', null)
+      where += ` AND read_at IS NULL`
     }
 
-    const { data, error } = await query
-      .order('created_at', { ascending: false })
-      .limit(50)
-
-    if (error) throw error
+    const data = await queryRows(
+      `SELECT n.*, u.id as actor_id, u.first_name, u.last_name, u.avatar_url
+       FROM notifications n
+       LEFT JOIN auth.users u ON n.actor_id = u.id
+       WHERE ${where}
+       ORDER BY n.created_at DESC
+       LIMIT 50`,
+      params
+    )
 
     return NextResponse.json(data)
   } catch (error) {
@@ -75,14 +81,7 @@ export async function PUT(req: NextRequest) {
     }
 
     if (action === 'mark_read') {
-      const { error } = await supabase
-        .from('notifications')
-        .update({ read_at: new Date().toISOString() })
-        .eq('id', notification_id)
-        .eq('user_id', user.id)
-
-      if (error) throw error
-
+      await markNotificationAsRead(notification_id)
       return NextResponse.json({ success: true })
     } else if (action === 'mark_all_read') {
       const orgId = body.org_id
@@ -93,15 +92,7 @@ export async function PUT(req: NextRequest) {
         )
       }
 
-      const { error } = await supabase
-        .from('notifications')
-        .update({ read_at: new Date().toISOString() })
-        .eq('user_id', user.id)
-        .eq('org_id', orgId)
-        .is('read_at', null)
-
-      if (error) throw error
-
+      await markAllNotificationsAsRead(orgId)
       return NextResponse.json({ success: true })
     } else {
       return NextResponse.json(
@@ -140,13 +131,7 @@ export async function DELETE(req: NextRequest) {
       )
     }
 
-    const { error } = await supabase
-      .from('notifications')
-      .delete()
-      .eq('id', notificationId)
-      .eq('user_id', user.id)
-
-    if (error) throw error
+    await deleteNotification(notificationId)
 
     return NextResponse.json({ success: true })
   } catch (error) {

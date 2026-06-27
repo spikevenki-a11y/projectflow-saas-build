@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { queryOne, queryRows } from '@/lib/db'
 
 export type NotificationType = 'task_assigned' | 'task_commented' | 'task_status_changed' | 'task_mentioned'
 
@@ -22,76 +23,53 @@ export interface Notification {
 
 export async function getUserNotifications(orgId: string): Promise<Notification[]> {
   const supabase = await createClient()
-  
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) throw new Error('Not authenticated')
 
-  const { data, error } = await supabase
-    .from('notifications')
-    .select(`
-      *,
-      actor:actor_id(id, first_name, last_name, avatar_url)
-    `)
-    .eq('user_id', user.id)
-    .eq('org_id', orgId)
-    .order('created_at', { ascending: false })
-    .limit(50)
-
-  if (error) throw error
-  return data || []
+  const rows = await queryRows(
+    `SELECT n.*, u.id as actor_id, u.first_name, u.last_name, u.avatar_url
+     FROM notifications n
+     LEFT JOIN auth.users u ON n.actor_id = u.id
+     WHERE n.user_id = $1 AND n.org_id = $2
+     ORDER BY n.created_at DESC
+     LIMIT 50`,
+    [user.id, orgId]
+  )
+  return rows || []
 }
 
 export async function getUnreadNotificationCount(orgId: string): Promise<number> {
   const supabase = await createClient()
-  
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) throw new Error('Not authenticated')
 
-  const { count, error } = await supabase
-    .from('notifications')
-    .select('*', { count: 'exact', head: true })
-    .eq('user_id', user.id)
-    .eq('org_id', orgId)
-    .is('read_at', null)
-
-  if (error) throw error
-  return count || 0
+  const result = await queryOne(
+    `SELECT COUNT(*) as count FROM notifications 
+     WHERE user_id = $1 AND org_id = $2 AND read_at IS NULL`,
+    [user.id, orgId]
+  )
+  return result?.count || 0
 }
 
 export async function markNotificationAsRead(notificationId: string): Promise<void> {
-  const supabase = await createClient()
-
-  const { error } = await supabase
-    .from('notifications')
-    .update({ read_at: new Date().toISOString() })
-    .eq('id', notificationId)
-
-  if (error) throw error
+  await queryOne(
+    `UPDATE notifications SET read_at = NOW() WHERE id = $1`,
+    [notificationId]
+  )
 }
 
 export async function markAllNotificationsAsRead(orgId: string): Promise<void> {
   const supabase = await createClient()
-  
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) throw new Error('Not authenticated')
 
-  const { error } = await supabase
-    .from('notifications')
-    .update({ read_at: new Date().toISOString() })
-    .eq('user_id', user.id)
-    .eq('org_id', orgId)
-    .is('read_at', null)
-
-  if (error) throw error
+  await queryOne(
+    `UPDATE notifications SET read_at = NOW() 
+     WHERE user_id = $1 AND org_id = $2 AND read_at IS NULL`,
+    [user.id, orgId]
+  )
 }
 
 export async function deleteNotification(notificationId: string): Promise<void> {
-  const supabase = await createClient()
-
-  const { error } = await supabase
-    .from('notifications')
-    .delete()
-    .eq('id', notificationId)
-
-  if (error) throw error
+  await queryOne(`DELETE FROM notifications WHERE id = $1`, [notificationId])
 }

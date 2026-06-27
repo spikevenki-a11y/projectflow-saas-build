@@ -1,4 +1,5 @@
-import { createClient } from '@/lib/supabase/client'
+import { createClient } from '@/lib/supabase/server'
+import { queryOne } from '@/lib/db'
 
 export type ViewType = 'list' | 'board' | 'calendar'
 export type SortBy = 'created_at' | 'due_date' | 'priority' | 'status'
@@ -23,27 +24,17 @@ export async function getViewPreference(
   orgId: string,
   projectId: string | null = null
 ): Promise<ViewPreference | null> {
-  const supabase = createClient()
-
+  const supabase = await createClient()
   const { data: { user }, error: userError } = await supabase.auth.getUser()
   if (userError || !user) throw userError
 
-  const { data, error } = await supabase
-    .from('view_preferences')
-    .select('*')
-    .eq('org_id', orgId)
-    .eq('user_id', user.id)
-    .eq('project_id', projectId)
-    .single()
+  const data = await queryOne(
+    `SELECT * FROM view_preferences 
+     WHERE org_id = $1 AND user_id = $2 AND project_id IS NOT DISTINCT FROM $3`,
+    [orgId, user.id, projectId]
+  )
 
-  // Not found is okay - return null
-  if (error?.code === 'PGRST116') {
-    return null
-  }
-
-  if (error) throw error
-
-  return data as ViewPreference
+  return data as ViewPreference | null
 }
 
 /**
@@ -53,32 +44,32 @@ export async function saveViewPreference(
   orgId: string,
   preference: Partial<ViewPreference> & { project_id?: string | null }
 ): Promise<ViewPreference> {
-  const supabase = createClient()
-
+  const supabase = await createClient()
   const { data: { user }, error: userError } = await supabase.auth.getUser()
   if (userError || !user) throw userError
 
-  const { data, error } = await supabase
-    .from('view_preferences')
-    .upsert(
-      {
-        org_id: orgId,
-        user_id: user.id,
-        project_id: preference.project_id || null,
-        view_type: preference.view_type || 'list',
-        sort_by: preference.sort_by || 'created_at',
-        sort_order: preference.sort_order || 'desc',
-        filters: preference.filters || {},
-        updated_at: new Date().toISOString(),
-      },
-      {
-        onConflict: 'org_id,user_id,project_id',
-      }
-    )
-    .select()
-    .single()
+  const data = await queryOne(
+    `INSERT INTO view_preferences (org_id, user_id, project_id, view_type, sort_by, sort_order, filters, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+     ON CONFLICT(org_id, user_id, project_id) DO UPDATE SET
+       view_type = EXCLUDED.view_type,
+       sort_by = EXCLUDED.sort_by,
+       sort_order = EXCLUDED.sort_order,
+       filters = EXCLUDED.filters,
+       updated_at = NOW()
+     RETURNING *`,
+    [
+      orgId,
+      user.id,
+      preference.project_id || null,
+      preference.view_type || 'list',
+      preference.sort_by || 'created_at',
+      preference.sort_order || 'desc',
+      JSON.stringify(preference.filters || {}),
+    ]
+  )
 
-  if (error) throw error
+  if (!data) throw new Error('Failed to save view preference')
 
   return data as ViewPreference
 }

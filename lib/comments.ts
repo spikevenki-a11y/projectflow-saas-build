@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { queryOne, queryRows } from '@/lib/db'
 
 export interface Comment {
   id: string
@@ -18,20 +19,16 @@ export interface Comment {
 }
 
 export async function getTaskComments(taskId: string): Promise<Comment[]> {
-  const supabase = await createClient()
-  
-  const { data, error } = await supabase
-    .from('comments')
-    .select(`
-      *,
-      author:author_id(id, first_name, last_name, avatar_url)
-    `)
-    .eq('task_id', taskId)
-    .is('deleted_at', null)
-    .order('created_at', { ascending: true })
-
-  if (error) throw error
-  return data || []
+  const rows = await queryRows(
+    `SELECT c.*, 
+            u.id as author_id, u.first_name, u.last_name, u.avatar_url
+     FROM comments c
+     LEFT JOIN auth.users u ON c.author_id = u.id
+     WHERE c.task_id = $1 AND c.deleted_at IS NULL
+     ORDER BY c.created_at ASC`,
+    [taskId]
+  )
+  return rows || []
 }
 
 export async function createComment(
@@ -40,49 +37,41 @@ export async function createComment(
   content: string
 ): Promise<Comment> {
   const supabase = await createClient()
-  
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) throw new Error('Not authenticated')
 
-  const { data, error } = await supabase
-    .from('comments')
-    .insert({
-      task_id: taskId,
-      org_id: orgId,
-      author_id: user.id,
-      content
-    })
-    .select()
-    .single()
+  const row = await queryOne(
+    `INSERT INTO comments (task_id, org_id, author_id, content)
+     VALUES ($1, $2, $3, $4)
+     RETURNING *`,
+    [taskId, orgId, user.id, content]
+  )
 
-  if (error) throw error
-  return data
+  if (!row) throw new Error('Failed to create comment')
+  return row
 }
 
 export async function updateComment(
   commentId: string,
   content: string
 ): Promise<Comment> {
-  const supabase = await createClient()
+  const row = await queryOne(
+    `UPDATE comments 
+     SET content = $1, updated_at = NOW()
+     WHERE id = $2
+     RETURNING *`,
+    [content, commentId]
+  )
 
-  const { data, error } = await supabase
-    .from('comments')
-    .update({ content, updated_at: new Date().toISOString() })
-    .eq('id', commentId)
-    .select()
-    .single()
-
-  if (error) throw error
-  return data
+  if (!row) throw new Error('Failed to update comment')
+  return row
 }
 
 export async function deleteComment(commentId: string): Promise<void> {
-  const supabase = await createClient()
-
-  const { error } = await supabase
-    .from('comments')
-    .update({ deleted_at: new Date().toISOString() })
-    .eq('id', commentId)
-
-  if (error) throw error
+  await queryOne(
+    `UPDATE comments 
+     SET deleted_at = NOW()
+     WHERE id = $1`,
+    [commentId]
+  )
 }
