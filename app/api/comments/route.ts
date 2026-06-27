@@ -1,9 +1,10 @@
 import { createClient } from '@/lib/supabase/server'
 import { NextRequest, NextResponse } from 'next/server'
+import { getTaskComments, createComment } from '@/lib/comments'
+import { queryOne } from '@/lib/db'
 
 export async function GET(req: NextRequest) {
   try {
-    const supabase = await createClient()
     const { searchParams } = new URL(req.url)
     const taskId = searchParams.get('task_id')
 
@@ -14,19 +15,8 @@ export async function GET(req: NextRequest) {
       )
     }
 
-    const { data, error } = await supabase
-      .from('comments')
-      .select(`
-        *,
-        author:author_id(id, first_name, last_name, avatar_url)
-      `)
-      .eq('task_id', taskId)
-      .is('deleted_at', null)
-      .order('created_at', { ascending: true })
-
-    if (error) throw error
-
-    return NextResponse.json(data)
+    const comments = await getTaskComments(taskId)
+    return NextResponse.json(comments)
   } catch (error) {
     console.error('[v0] GET /api/comments error:', error)
     return NextResponse.json(
@@ -59,12 +49,10 @@ export async function POST(req: NextRequest) {
     }
 
     // Verify user is member of org
-    const { data: member } = await supabase
-      .from('organization_members')
-      .select('id')
-      .eq('org_id', org_id)
-      .eq('user_id', user.id)
-      .single()
+    const member = await queryOne(
+      `SELECT id FROM organization_members WHERE org_id = $1 AND user_id = $2`,
+      [org_id, user.id]
+    )
 
     if (!member) {
       return NextResponse.json(
@@ -74,23 +62,8 @@ export async function POST(req: NextRequest) {
     }
 
     // Create comment
-    const { data, error } = await supabase
-      .from('comments')
-      .insert({
-        task_id,
-        org_id,
-        author_id: user.id,
-        content
-      })
-      .select(`
-        *,
-        author:author_id(id, first_name, last_name, avatar_url)
-      `)
-      .single()
-
-    if (error) throw error
-
-    return NextResponse.json(data)
+    const comment = await createComment(task_id, org_id, content)
+    return NextResponse.json(comment)
   } catch (error) {
     console.error('[v0] POST /api/comments error:', error)
     return NextResponse.json(

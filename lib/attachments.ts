@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { queryOne, queryRows } from '@/lib/db'
 
 export interface Attachment {
   id: string
@@ -69,24 +70,15 @@ export async function createAttachment(
   blobUrl: string,
   blobPathname: string
 ) {
-  const supabase = await createClient()
+  const attachment = await queryOne(
+    `INSERT INTO attachments (org_id, uploaded_by, file_name, file_size, file_type, blob_url, blob_pathname)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     RETURNING *`,
+    [orgId, uploadedBy, fileName, fileSize, fileType, blobUrl, blobPathname]
+  )
 
-  const { data, error } = await supabase
-    .from('attachments')
-    .insert({
-      org_id: orgId,
-      uploaded_by: uploadedBy,
-      file_name: fileName,
-      file_size: fileSize,
-      file_type: fileType,
-      blob_url: blobUrl,
-      blob_pathname: blobPathname,
-    })
-    .select()
-    .single()
-
-  if (error) throw new Error(`Failed to create attachment: ${error.message}`)
-  return data as Attachment
+  if (!attachment) throw new Error('Failed to create attachment')
+  return attachment as Attachment
 }
 
 // Attach file to task
@@ -95,15 +87,11 @@ export async function attachToTask(
   attachmentId: string,
   orgId: string
 ) {
-  const supabase = await createClient()
-
-  const { error } = await supabase.from('task_attachments').insert({
-    task_id: taskId,
-    attachment_id: attachmentId,
-    org_id: orgId,
-  })
-
-  if (error) throw new Error(`Failed to attach to task: ${error.message}`)
+  await queryOne(
+    `INSERT INTO task_attachments (task_id, attachment_id, org_id)
+     VALUES ($1, $2, $3)`,
+    [taskId, attachmentId, orgId]
+  )
 }
 
 // Attach file to comment
@@ -112,91 +100,65 @@ export async function attachToComment(
   attachmentId: string,
   orgId: string
 ) {
-  const supabase = await createClient()
-
-  const { error } = await supabase.from('comment_attachments').insert({
-    comment_id: commentId,
-    attachment_id: attachmentId,
-    org_id: orgId,
-  })
-
-  if (error) throw new Error(`Failed to attach to comment: ${error.message}`)
+  await queryOne(
+    `INSERT INTO comment_attachments (comment_id, attachment_id, org_id)
+     VALUES ($1, $2, $3)`,
+    [commentId, attachmentId, orgId]
+  )
 }
 
 // Get task attachments
 export async function getTaskAttachments(taskId: string) {
-  const supabase = await createClient()
-
-  const { data, error } = await supabase
-    .from('task_attachments')
-    .select('*, attachment:attachments(*)')
-    .eq('task_id', taskId)
-    .order('created_at', { ascending: false })
-
-  if (error) throw new Error(`Failed to fetch task attachments: ${error.message}`)
-  return data as TaskAttachment[]
+  const rows = await queryRows(
+    `SELECT ta.*, a.* FROM task_attachments ta
+     LEFT JOIN attachments a ON ta.attachment_id = a.id
+     WHERE ta.task_id = $1
+     ORDER BY ta.created_at DESC`,
+    [taskId]
+  )
+  return rows as TaskAttachment[]
 }
 
 // Get comment attachments
 export async function getCommentAttachments(commentId: string) {
-  const supabase = await createClient()
-
-  const { data, error } = await supabase
-    .from('comment_attachments')
-    .select('*, attachment:attachments(*)')
-    .eq('comment_id', commentId)
-    .order('created_at', { ascending: false })
-
-  if (error) throw new Error(`Failed to fetch comment attachments: ${error.message}`)
-  return data as CommentAttachment[]
+  const rows = await queryRows(
+    `SELECT ca.*, a.* FROM comment_attachments ca
+     LEFT JOIN attachments a ON ca.attachment_id = a.id
+     WHERE ca.comment_id = $1
+     ORDER BY ca.created_at DESC`,
+    [commentId]
+  )
+  return rows as CommentAttachment[]
 }
 
 // Delete attachment
 export async function deleteAttachment(attachmentId: string) {
-  const supabase = await createClient()
+  const attachment = await queryOne(
+    `SELECT blob_pathname FROM attachments WHERE id = $1`,
+    [attachmentId]
+  )
 
-  // First, get the attachment to get the blob pathname
-  const { data: attachment, error: fetchError } = await supabase
-    .from('attachments')
-    .select('blob_pathname')
-    .eq('id', attachmentId)
-    .single()
+  if (!attachment) throw new Error('Attachment not found')
 
-  if (fetchError) throw new Error(`Failed to fetch attachment: ${fetchError.message}`)
-
-  // Delete from database (cascade will remove task/comment associations)
-  const { error: deleteError } = await supabase
-    .from('attachments')
-    .delete()
-    .eq('id', attachmentId)
-
-  if (deleteError) throw new Error(`Failed to delete attachment: ${deleteError.message}`)
+  await queryOne(`DELETE FROM attachments WHERE id = $1`, [attachmentId])
 
   return attachment?.blob_pathname
 }
 
 // Remove attachment from task
 export async function removeTaskAttachment(taskAttachmentId: string) {
-  const supabase = await createClient()
-
-  const { error } = await supabase
-    .from('task_attachments')
-    .delete()
-    .eq('id', taskAttachmentId)
-
-  if (error) throw new Error(`Failed to remove task attachment: ${error.message}`)
+  await queryOne(
+    `DELETE FROM task_attachments WHERE id = $1`,
+    [taskAttachmentId]
+  )
 }
 
 // Remove attachment from comment
 export async function removeCommentAttachment(commentAttachmentId: string) {
-  const supabase = await createClient()
-
-  const { error } = await supabase
-    .from('comment_attachments')
-    .delete()
-    .eq('id', commentAttachmentId)
-
-  if (error) throw new Error(`Failed to remove comment attachment: ${error.message}`)
+  await queryOne(
+    `DELETE FROM comment_attachments WHERE id = $1`,
+    [commentAttachmentId]
+  )
 }
 
 // Format file size for display

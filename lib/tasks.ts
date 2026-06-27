@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { queryOne, queryRows } from '@/lib/db'
 
 export interface Task {
   id: string
@@ -17,29 +18,22 @@ export interface Task {
 }
 
 export async function getTasks(projectId: string, orgId: string) {
-  const supabase = await createClient()
-  const { data, error } = await supabase
-    .from('tasks')
-    .select('*')
-    .eq('project_id', projectId)
-    .eq('org_id', orgId)
-    .order('order_index', { ascending: true })
-
-  if (error) throw error
-  return data as Task[]
+  const rows = await queryRows(
+    `SELECT * FROM tasks 
+     WHERE project_id = $1 AND org_id = $2
+     ORDER BY order_index ASC`,
+    [projectId, orgId]
+  )
+  return rows as Task[]
 }
 
 export async function getTask(taskId: string, orgId: string) {
-  const supabase = await createClient()
-  const { data, error } = await supabase
-    .from('tasks')
-    .select('*')
-    .eq('id', taskId)
-    .eq('org_id', orgId)
-    .single()
-
-  if (error) throw error
-  return data as Task
+  const row = await queryOne(
+    `SELECT * FROM tasks WHERE id = $1 AND org_id = $2`,
+    [taskId, orgId]
+  )
+  if (!row) throw new Error('Task not found')
+  return row as Task
 }
 
 export async function createTask(
@@ -61,34 +55,32 @@ export async function createTask(
   if (!user) throw new Error('Not authenticated')
 
   // Get the max order_index for the project
-  const { data: lastTask } = await supabase
-    .from('tasks')
-    .select('order_index')
-    .eq('project_id', projectId)
-    .order('order_index', { ascending: false })
-    .limit(1)
-    .single()
+  const maxRow = await queryOne(
+    `SELECT MAX(order_index) as max_index FROM tasks WHERE project_id = $1`,
+    [projectId]
+  )
 
-  const orderIndex = (lastTask?.order_index || 0) + 1
+  const orderIndex = (maxRow?.max_index || 0) + 1
 
-  const { data: task, error } = await supabase
-    .from('tasks')
-    .insert({
-      project_id: projectId,
-      org_id: orgId,
-      title: data.title,
-      description: data.description,
-      priority: data.priority || 'medium',
-      assigned_to: data.assigned_to,
-      due_date: data.due_date,
-      order_index: orderIndex,
-      created_by: user.id,
-    })
-    .select()
-    .single()
+  const row = await queryOne(
+    `INSERT INTO tasks (project_id, org_id, title, description, priority, assigned_to, due_date, order_index, created_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+     RETURNING *`,
+    [
+      projectId,
+      orgId,
+      data.title,
+      data.description || null,
+      data.priority || 'medium',
+      data.assigned_to || null,
+      data.due_date || null,
+      orderIndex,
+      user.id,
+    ]
+  )
 
-  if (error) throw error
-  return task as Task
+  if (!row) throw new Error('Failed to create task')
+  return row as Task
 }
 
 export async function updateTask(
@@ -104,61 +96,43 @@ export async function updateTask(
     order_index: number
   }>
 ) {
-  const supabase = await createClient()
-  const { data: task, error } = await supabase
-    .from('tasks')
-    .update({
-      ...data,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', taskId)
-    .eq('org_id', orgId)
-    .select()
-    .single()
-
-  if (error) throw error
-
-  // Log change to history if status changed
-  if (data.status) {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
-
-    if (user) {
-      await supabase.from('task_history').insert({
-        task_id: taskId,
-        org_id: orgId,
-        changed_by: user.id,
-        action: 'status_changed',
-        field_name: 'status',
-        new_value: data.status,
-      })
-    }
+  const entries = Object.entries(data)
+  if (entries.length === 0) {
+    return getTask(taskId, orgId)
   }
 
-  return task as Task
+  const setClause = entries
+    .map(([key], index) => `${key} = $${index + 1}`)
+    .join(', ')
+
+  const values = entries.map(([, value]) => value)
+  values.push(taskId, orgId)
+
+  const row = await queryOne(
+    `UPDATE tasks 
+     SET ${setClause}, updated_at = NOW()
+     WHERE id = $${values.length - 1} AND org_id = $${values.length}
+     RETURNING *`,
+    values
+  )
+
+  if (!row) throw new Error('Failed to update task')
+  return row as Task
 }
 
 export async function deleteTask(taskId: string, orgId: string) {
-  const supabase = await createClient()
-  const { error } = await supabase
-    .from('tasks')
-    .delete()
-    .eq('id', taskId)
-    .eq('org_id', orgId)
-
-  if (error) throw error
+  await queryOne(
+    `DELETE FROM tasks WHERE id = $1 AND org_id = $2`,
+    [taskId, orgId]
+  )
 }
 
 export async function getTaskHistory(taskId: string, orgId: string) {
-  const supabase = await createClient()
-  const { data, error } = await supabase
-    .from('task_history')
-    .select('*')
-    .eq('task_id', taskId)
-    .eq('org_id', orgId)
-    .order('created_at', { ascending: false })
-
-  if (error) throw error
-  return data
+  const rows = await queryRows(
+    `SELECT * FROM audit_logs
+     WHERE resource_id = $1 AND org_id = $2 AND resource_type = 'task'
+     ORDER BY created_at DESC`,
+    [taskId, orgId]
+  )
+  return rows
 }

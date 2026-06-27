@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { queryOne, queryRows } from '@/lib/db'
 
 export interface Role {
   id: string
@@ -19,34 +20,26 @@ export interface Permission {
 
 // Get all roles for an organization
 export async function getRolesByOrg(orgId: string) {
-  const supabase = await createClient()
-  const { data, error } = await supabase
-    .from('roles')
-    .select('*')
-    .eq('org_id', orgId)
-    .order('is_default', { ascending: false })
-    .order('created_at', { ascending: false })
-
-  if (error) throw error
-  return data as Role[]
+  const rows = await queryRows(
+    `SELECT * FROM roles 
+     WHERE org_id = $1 
+     ORDER BY is_default DESC, created_at DESC`,
+    [orgId]
+  )
+  return rows as Role[]
 }
 
 // Get a single role with its permissions
 export async function getRoleWithPermissions(roleId: string) {
-  const supabase = await createClient()
-  const { data, error } = await supabase
-    .from('roles')
-    .select(
-      `
-      *,
-      role_permissions (*)
-    `
-    )
-    .eq('id', roleId)
-    .single()
+  const role = await queryOne(`SELECT * FROM roles WHERE id = $1`, [roleId])
+  if (!role) return null
 
-  if (error) throw error
-  return data
+  const permissions = await queryRows(
+    `SELECT * FROM role_permissions WHERE role_id = $1`,
+    [roleId]
+  )
+
+  return { ...role, role_permissions: permissions }
 }
 
 // Create a new role
@@ -54,19 +47,13 @@ export async function createRole(
   orgId: string,
   data: { name: string; description?: string }
 ) {
-  const supabase = await createClient()
-  const { data: role, error } = await supabase
-    .from('roles')
-    .insert({
-      org_id: orgId,
-      name: data.name,
-      description: data.description || null,
-      is_default: false,
-    })
-    .select()
-    .single()
-
-  if (error) throw error
+  const role = await queryOne(
+    `INSERT INTO roles (org_id, name, description, is_default)
+     VALUES ($1, $2, $3, $4)
+     RETURNING *`,
+    [orgId, data.name, data.description || null, false]
+  )
+  if (!role) throw new Error('Failed to create role')
   return role as Role
 }
 
@@ -75,24 +62,23 @@ export async function updateRole(
   roleId: string,
   data: { name?: string; description?: string }
 ) {
-  const supabase = await createClient()
-  const { data: role, error } = await supabase
-    .from('roles')
-    .update(data)
-    .eq('id', roleId)
-    .select()
-    .single()
+  const entries = Object.entries(data)
+  if (entries.length === 0) return queryOne(`SELECT * FROM roles WHERE id = $1`, [roleId])
 
-  if (error) throw error
+  const setClause = entries.map(([key], i) => `${key} = $${i + 1}`).join(', ')
+  const values = [...entries.map(([, v]) => v), roleId]
+
+  const role = await queryOne(
+    `UPDATE roles SET ${setClause} WHERE id = $${values.length} RETURNING *`,
+    values
+  )
+  if (!role) throw new Error('Failed to update role')
   return role as Role
 }
 
 // Delete a role (non-default only)
 export async function deleteRole(roleId: string) {
-  const supabase = await createClient()
-  const { error } = await supabase.from('roles').delete().eq('id', roleId)
-
-  if (error) throw error
+  await queryOne(`DELETE FROM roles WHERE id = $1 AND is_default = FALSE`, [roleId])
 }
 
 // Add a permission to a role
@@ -101,42 +87,28 @@ export async function addPermission(
   resource: Permission['resource'],
   action: Permission['action']
 ) {
-  const supabase = await createClient()
-  const { data, error } = await supabase
-    .from('role_permissions')
-    .insert({
-      role_id: roleId,
-      resource,
-      action,
-    })
-    .select()
-    .single()
-
-  if (error) throw error
-  return data as Permission
+  const perm = await queryOne(
+    `INSERT INTO role_permissions (role_id, resource, action)
+     VALUES ($1, $2, $3)
+     RETURNING *`,
+    [roleId, resource, action]
+  )
+  if (!perm) throw new Error('Failed to add permission')
+  return perm as Permission
 }
 
 // Remove a permission from a role
 export async function removePermission(permissionId: string) {
-  const supabase = await createClient()
-  const { error } = await supabase
-    .from('role_permissions')
-    .delete()
-    .eq('id', permissionId)
-
-  if (error) throw error
+  await queryOne(`DELETE FROM role_permissions WHERE id = $1`, [permissionId])
 }
 
 // Get permissions for a role
 export async function getPermissions(roleId: string) {
-  const supabase = await createClient()
-  const { data, error } = await supabase
-    .from('role_permissions')
-    .select('*')
-    .eq('role_id', roleId)
-
-  if (error) throw error
-  return data as Permission[]
+  const rows = await queryRows(
+    `SELECT * FROM role_permissions WHERE role_id = $1`,
+    [roleId]
+  )
+  return rows as Permission[]
 }
 
 // Check if a user has a specific permission
@@ -149,27 +121,24 @@ export async function userHasPermission(
   const supabase = await createClient()
 
   // Get org member role
-  const { data: orgMember, error: orgError } = await supabase
-    .from('organization_members')
-    .select('role')
-    .eq('user_id', userId)
-    .eq('org_id', orgId)
-    .single()
+  const orgMember = await queryOne(
+    `SELECT role FROM organization_members 
+     WHERE user_id = $1 AND org_id = $2`,
+    [userId, orgId]
+  )
 
-  if (orgError || !orgMember) return false
+  if (!orgMember) return false
 
   // Owner and admin have all permissions
   if (orgMember.role === 'owner' || orgMember.role === 'admin') return true
 
   // Check role permissions
-  const { data: permissions, error: permError } = await supabase
-    .from('role_permissions')
-    .select('*')
-    .eq('resource', resource)
-    .eq('action', action)
-
-  if (permError) return false
+  const perm = await queryOne(
+    `SELECT * FROM role_permissions 
+     WHERE resource = $1 AND action = $2`,
+    [resource, action]
+  )
 
   // For now, regular members get default permissions based on org role
-  return false
+  return perm ? true : false
 }
