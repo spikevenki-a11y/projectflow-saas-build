@@ -2,8 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
+import { usePathname, useRouter } from 'next/navigation'
 import { cn } from '@/lib/utils'
 import { LayoutDashboard, FolderOpen, Settings, LogOut, Menu, X } from 'lucide-react'
 
@@ -11,10 +10,9 @@ export function Sidebar() {
   const [open, setOpen] = useState(true)
   const [orgSlug, setOrgSlug] = useState<string | null>(null)
   const pathname = usePathname()
-  const supabase = createClient()
+  const router = useRouter()
 
   useEffect(() => {
-    // Extract org slug from pathname if available
     const match = pathname.match(/\/org\/([^/]+)/)
     if (match) {
       setOrgSlug(match[1])
@@ -22,7 +20,9 @@ export function Sidebar() {
   }, [pathname])
 
   const handleLogout = async () => {
-    await supabase.auth.signOut()
+    await fetch('/api/auth/logout', { method: 'POST' })
+    router.push('/auth/login')
+    router.refresh()
   }
 
   const links = [

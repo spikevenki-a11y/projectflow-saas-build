@@ -1,5 +1,4 @@
-import { createClient } from '@/lib/supabase/server'
-import { queryOne, queryRows } from '@/lib/db'
+import pool from '@/lib/db'
 
 export interface Project {
   id: string
@@ -14,22 +13,22 @@ export interface Project {
 }
 
 export async function getProjects(orgId: string) {
-  const rows = await queryRows(
-    `SELECT * FROM projects 
+  const rows = await pool.query(
+    `SELECT * FROM projects
      WHERE org_id = $1 AND status = 'active'
      ORDER BY name ASC`,
     [orgId]
   )
-  return rows as Project[]
+  return rows.rows as Project[]
 }
 
 export async function getProject(projectId: string, orgId: string) {
-  const row = await queryOne(
+  const result = await pool.query(
     `SELECT * FROM projects WHERE id = $1 AND org_id = $2`,
     [projectId, orgId]
   )
-  if (!row) throw new Error('Project not found')
-  return row as Project
+  if (!result.rows[0]) throw new Error('Project not found')
+  return result.rows[0] as Project
 }
 
 export async function createProject(
@@ -38,24 +37,18 @@ export async function createProject(
     name: string
     description?: string
     color?: string
-  }
+  },
+  userId: string
 ) {
-  const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-
-  if (!user) throw new Error('Not authenticated')
-
-  const row = await queryOne(
+  const result = await pool.query(
     `INSERT INTO projects (org_id, name, description, color, created_by)
      VALUES ($1, $2, $3, $4, $5)
      RETURNING *`,
-    [orgId, data.name, data.description || null, data.color || '#3b82f6', user.id]
+    [orgId, data.name, data.description || null, data.color || '#3b82f6', userId]
   )
 
-  if (!row) throw new Error('Failed to create project')
-  return row as Project
+  if (!result.rows[0]) throw new Error('Failed to create project')
+  return result.rows[0] as Project
 }
 
 export async function updateProject(
@@ -80,20 +73,20 @@ export async function updateProject(
   const values = entries.map(([, value]) => value)
   values.push(projectId, orgId)
 
-  const row = await queryOne(
-    `UPDATE projects 
+  const result = await pool.query(
+    `UPDATE projects
      SET ${setClause}, updated_at = NOW()
      WHERE id = $${values.length - 1} AND org_id = $${values.length}
      RETURNING *`,
     values
   )
 
-  if (!row) throw new Error('Failed to update project')
-  return row as Project
+  if (!result.rows[0]) throw new Error('Failed to update project')
+  return result.rows[0] as Project
 }
 
 export async function deleteProject(projectId: string, orgId: string) {
-  await queryOne(
+  await pool.query(
     `DELETE FROM projects WHERE id = $1 AND org_id = $2`,
     [projectId, orgId]
   )

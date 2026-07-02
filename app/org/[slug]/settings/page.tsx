@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { AlertCircle, Loader2, Plus, Trash2 } from 'lucide-react'
@@ -35,32 +34,22 @@ export default function SettingsPage() {
   const [email, setEmail] = useState('')
   const [role, setRole] = useState<'admin' | 'member' | 'guest'>('member')
   const [inviting, setInviting] = useState(false)
-  const supabase = createClient()
 
   useEffect(() => {
     const fetchData = async () => {
       if (!slug) return
 
       try {
-        const { data: orgData } = await supabase
-          .from('organizations')
-          .select('*')
-          .eq('slug', slug)
-          .single()
-
-        if (orgData) {
-          setOrg(orgData)
-
-          const { data: membersData } = await supabase
-            .from('organization_members')
-            .select('*, profiles:user_id(first_name, last_name)')
-            .eq('org_id', orgData.id)
-            .order('joined_at', { ascending: false })
-
-          if (membersData) {
-            setMembers(membersData)
-          }
+        const res = await fetch(`/api/organizations/${slug}`)
+        if (!res.ok) {
+          setError('Failed to load organization data')
+          return
         }
+
+        const data = await res.json()
+        const { members: memberList, ...orgData } = data
+        setOrg(orgData)
+        setMembers(memberList ?? [])
       } catch (err) {
         setError('Failed to load organization data')
       } finally {
@@ -94,12 +83,14 @@ export default function SettingsPage() {
     if (!confirm('Are you sure you want to remove this member?')) return
 
     try {
-      const { error: deleteError } = await supabase
-        .from('organization_members')
-        .delete()
-        .eq('id', memberId)
+      const res = await fetch(`/api/organizations/members?id=${memberId}`, {
+        method: 'DELETE',
+      })
 
-      if (deleteError) throw deleteError
+      if (!res.ok) {
+        const data = await res.json()
+        throw new Error(data.error || 'Failed to remove member')
+      }
 
       setMembers(members.filter((m) => m.id !== memberId))
     } catch (err) {

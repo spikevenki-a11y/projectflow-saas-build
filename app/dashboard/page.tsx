@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Plus, Settings } from 'lucide-react'
 import { OrganizationCard } from '@/components/dashboard/organization-card'
@@ -19,21 +18,25 @@ interface Organization {
 }
 
 export default function DashboardPage() {
-  const [orgs, setOrgs] = useState<Organization[]>([])
+  const [orgs, setorgs] = useState<Organization[]>([])
   const [loading, setLoading] = useState(true)
   const [showCreateDialog, setShowCreateDialog] = useState(false)
   const router = useRouter()
-  const supabase = createClient()
 
   const fetchOrganizations = async () => {
     try {
-      const { data, error } = await supabase
-        .from('organizations')
-        .select('*')
-        .order('created_at', { ascending: false })
+      const res = await fetch('/api/organizations')
+      if (!res.ok) throw new Error('Failed to fetch')
+      const data = await res.json()
+      console.log('Fetched organizations:', data)
+      setorgs(data)
 
-      if (error) throw error
-      setOrgs(data || [])
+      while (orgs.length > 0 && orgs[0].id === data[0].id) {
+        console.log('Waiting for new data...')
+
+        console.log('Current orgs:', orgs)
+      }
+      console.log('Fetched orgs:', orgs)
     } catch (err) {
       console.error('Error fetching organizations:', err)
     } finally {

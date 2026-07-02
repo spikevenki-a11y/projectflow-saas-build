@@ -1,5 +1,4 @@
-import { createClient as createServerClient } from '@/lib/supabase/server'
-import { queryOne, queryRows } from '@/lib/db'
+import pool from '@/lib/db'
 
 export interface Organization {
   id: string
@@ -21,72 +20,61 @@ export interface OrganizationMember {
   joined_at: string
 }
 
-/**
- * Get all organizations for the current user (Server)
- */
 export async function getUserOrganizations() {
+  const client = await pool.connect()
   try {
-    const rows = await queryRows(
+    const { rows } = await client.query(
       `SELECT * FROM organizations ORDER BY created_at DESC`
     )
     return rows as Organization[]
   } catch (error) {
     console.error('Error fetching organizations:', error)
     return []
+  } finally {
+    client.release()
   }
 }
 
-/**
- * Get organization by ID (Server)
- */
 export async function getOrganizationById(orgId: string) {
   try {
-    const row = await queryOne(
-      `SELECT * FROM organizations WHERE id = $1`,
-      [orgId]
-    )
-    return row as Organization | null
+    const client = await pool.connect()
+    try {
+      const { rows } = await client.query(
+        `SELECT * FROM organizations WHERE id = $1`,
+        [orgId]
+      )
+      return (rows[0] as Organization) || null
+    } finally {
+      client.release()
+    }
   } catch (error) {
     console.error('Error fetching organization:', error)
     return null
   }
 }
 
-/**
- * Create a new organization (Server)
- */
 export async function createOrganization(
   name: string,
   slug: string,
+  userId: string,
   description?: string
 ) {
-  const supabase = await createServerClient()
+  const client = await pool.connect()
+  try {
+    const { rows } = await client.query(
+      `INSERT INTO organizations (name, slug, description, owner_id)
+       VALUES ($1, $2, $3, $4)
+       RETURNING *`,
+      [name, slug, description || null, userId]
+    )
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-
-  if (!user) {
-    throw new Error('User not authenticated')
+    if (rows.length === 0) throw new Error('Failed to create organization')
+    return rows[0] as Organization
+  } finally {
+    client.release()
   }
-
-  const row = await queryOne(
-    `INSERT INTO organizations (name, slug, description, owner_id)
-     VALUES ($1, $2, $3, $4)
-     RETURNING *`,
-    [name, slug, description || null, user.id]
-  )
-
-  if (!row) {
-    throw new Error('Failed to create organization')
-  }
-
-  return row as Organization
 }
 
-/**
- * Update organization (Server)
- */
 export async function updateOrganization(
   orgId: string,
   updates: Partial<Organization>
@@ -105,142 +93,128 @@ export async function updateOrganization(
   const values = updateEntries.map(([, value]) => value)
   values.push(orgId)
 
-  const row = await queryOne(
-    `UPDATE organizations 
-     SET ${setClause}, updated_at = NOW()
-     WHERE id = $${values.length}
-     RETURNING *`,
-    values
-  )
+  const client = await pool.connect()
+  try {
+    const { rows } = await client.query(
+      `UPDATE organizations
+       SET ${setClause}, updated_at = NOW()
+       WHERE id = $${values.length}
+       RETURNING *`,
+      values
+    )
 
-  if (!row) {
-    throw new Error('Failed to update organization')
+    if (rows.length === 0) throw new Error('Failed to update organization')
+    return rows[0] as Organization
+  } finally {
+    client.release()
   }
-
-  return row as Organization
 }
 
-/**
- * Get organization members (Server)
- */
 export async function getOrganizationMembers(orgId: string) {
   try {
-    const rows = await queryRows(
-      `SELECT om.*, 
-              p.first_name, p.last_name, p.avatar_url
-       FROM organization_members om
-       LEFT JOIN auth.users p ON om.user_id = p.id
-       WHERE om.org_id = $1
-       ORDER BY om.joined_at DESC`,
-      [orgId]
-    )
-    return rows
+    const client = await pool.connect()
+    try {
+      const { rows } = await client.query(
+        `SELECT om.*,
+                u.first_name, u.last_name, u.avatar_url
+         FROM organization_members om
+         LEFT JOIN users u ON om.user_id = u.id
+         WHERE om.org_id = $1
+         ORDER BY om.joined_at DESC`,
+        [orgId]
+      )
+      return rows
+    } finally {
+      client.release()
+    }
   } catch (error) {
     console.error('Error fetching members:', error)
     return []
   }
 }
 
-/**
- * Add member to organization (Server)
- */
 export async function addOrganizationMember(
   orgId: string,
   userId: string,
-  role: 'admin' | 'member' | 'guest' = 'member'
+  role: 'admin' | 'member' | 'guest' = 'member',
+  invitedBy: string
 ) {
-  const supabase = await createServerClient()
+  const client = await pool.connect()
+  try {
+    const { rows } = await client.query(
+      `INSERT INTO organization_members (org_id, user_id, role, invited_by)
+       VALUES ($1, $2, $3, $4)
+       RETURNING *`,
+      [orgId, userId, role, invitedBy]
+    )
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-
-  if (!user) {
-    throw new Error('User not authenticated')
+    if (rows.length === 0) throw new Error('Failed to add member')
+    return rows[0] as OrganizationMember
+  } finally {
+    client.release()
   }
-
-  const row = await queryOne(
-    `INSERT INTO organization_members (org_id, user_id, role, invited_by)
-     VALUES ($1, $2, $3, $4)
-     RETURNING *`,
-    [orgId, userId, role, user.id]
-  )
-
-  if (!row) {
-    throw new Error('Failed to add member')
-  }
-
-  return row as OrganizationMember
 }
 
-/**
- * Update member role (Server)
- */
 export async function updateMemberRole(
   orgId: string,
   userId: string,
   role: 'admin' | 'member' | 'guest'
 ) {
-  const row = await queryOne(
-    `UPDATE organization_members 
-     SET role = $1
-     WHERE org_id = $2 AND user_id = $3
-     RETURNING *`,
-    [role, orgId, userId]
-  )
+  const client = await pool.connect()
+  try {
+    const { rows } = await client.query(
+      `UPDATE organization_members
+       SET role = $1
+       WHERE org_id = $2 AND user_id = $3
+       RETURNING *`,
+      [role, orgId, userId]
+    )
 
-  if (!row) {
-    throw new Error('Failed to update member role')
+    if (rows.length === 0) throw new Error('Failed to update member role')
+    return rows[0] as OrganizationMember
+  } finally {
+    client.release()
   }
-
-  return row as OrganizationMember
 }
 
-/**
- * Remove member from organization (Server)
- */
 export async function removeOrganizationMember(orgId: string, userId: string) {
-  await queryOne(
-    `DELETE FROM organization_members 
-     WHERE org_id = $1 AND user_id = $2`,
-    [orgId, userId]
-  )
+  const client = await pool.connect()
+  try {
+    await client.query(
+      `DELETE FROM organization_members WHERE org_id = $1 AND user_id = $2`,
+      [orgId, userId]
+    )
+  } finally {
+    client.release()
+  }
 }
 
-/**
- * Get user's current organization (Client-side for UI)
- * Note: Still uses Supabase client for now for browser clients
- */
 export async function getCurrentUserOrg(orgId: string) {
   try {
-    const row = await queryOne(
-      `SELECT * FROM organizations WHERE id = $1`,
-      [orgId]
-    )
-    return row as Organization | null
+    const client = await pool.connect()
+    try {
+      const { rows } = await client.query(
+        `SELECT * FROM organizations WHERE id = $1`,
+        [orgId]
+      )
+      return (rows[0] as Organization) || null
+    } finally {
+      client.release()
+    }
   } catch (error) {
     console.error('Error fetching organization:', error)
     return null
   }
 }
 
-/**
- * Check if user is org owner
- */
 export function isOrgOwner(member: OrganizationMember): boolean {
   return member.role === 'owner'
 }
 
-/**
- * Check if user is org admin
- */
 export function isOrgAdmin(member: OrganizationMember): boolean {
   return member.role === 'owner' || member.role === 'admin'
 }
 
-/**
- * Check if user can manage members
- */
 export function canManageMembers(member: OrganizationMember): boolean {
   return isOrgAdmin(member)
 }

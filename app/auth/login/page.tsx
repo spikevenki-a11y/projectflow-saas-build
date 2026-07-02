@@ -3,7 +3,6 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { AlertCircle, Loader2 } from 'lucide-react'
@@ -14,7 +13,6 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const router = useRouter()
-  const supabase = createClient()
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -22,18 +20,22 @@ export default function LoginPage() {
     setLoading(true)
 
     try {
-      const { error: signInError } = await supabase.auth.signInWithPassword({
-        email,
-        password,
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
       })
 
-      if (signInError) {
-        setError(signInError.message)
+      const data = await res.json()
+
+      if (!res.ok) {
+        setError(data.error || 'Login failed')
         return
       }
 
       router.push('/dashboard')
-    } catch (err) {
+      router.refresh()
+    } catch {
       setError('An unexpected error occurred')
     } finally {
       setLoading(false)

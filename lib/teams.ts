@@ -1,5 +1,4 @@
-import { createClient } from '@/lib/supabase/server'
-import { queryOne, queryRows, query } from '@/lib/db'
+import pool from '@/lib/db'
 
 export interface Team {
   id: string
@@ -21,120 +20,109 @@ export interface TeamMember {
   joined_at: string
 }
 
-// Get all teams for an organization
 export async function getTeamsByOrg(orgId: string) {
-  const rows = await queryRows(
+  const result = await pool.query(
     `SELECT * FROM teams WHERE org_id = $1 ORDER BY created_at DESC`,
     [orgId]
   )
-  return rows as Team[]
+  return result.rows as Team[]
 }
 
-// Get a single team with members and role information
 export async function getTeamWithMembers(teamId: string) {
-  const team = await queryOne(
+  const teamResult = await pool.query(
     `SELECT * FROM teams WHERE id = $1`,
     [teamId]
   )
+  const team = teamResult.rows[0]
   if (!team) return null
 
-  const members = await queryRows(
+  const membersResult = await pool.query(
     `SELECT tm.*, r.* FROM team_members tm
      LEFT JOIN roles r ON tm.role_id = r.id
      WHERE tm.team_id = $1`,
     [teamId]
   )
-  
-  return { ...team, team_members: members }
+
+  return { ...team, team_members: membersResult.rows }
 }
 
-// Create a new team
 export async function createTeam(
   orgId: string,
-  data: { name: string; description?: string; color?: string }
+  data: { name: string; description?: string; color?: string },
+  userId: string
 ) {
-  const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-
-  if (!user) throw new Error('Not authenticated')
-
-  const team = await queryOne(
+  const result = await pool.query(
     `INSERT INTO teams (org_id, name, description, color, created_by)
      VALUES ($1, $2, $3, $4, $5)
      RETURNING *`,
-    [orgId, data.name, data.description || null, data.color || '#8b5cf6', user.id]
+    [orgId, data.name, data.description || null, data.color || '#8b5cf6', userId]
   )
 
-  if (!team) throw new Error('Failed to create team')
-  return team as Team
+  if (!result.rows[0]) throw new Error('Failed to create team')
+  return result.rows[0] as Team
 }
 
-// Update a team
 export async function updateTeam(
   teamId: string,
   data: { name?: string; description?: string; color?: string }
 ) {
   const entries = Object.entries(data)
-  if (entries.length === 0) return queryOne(`SELECT * FROM teams WHERE id = $1`, [teamId])
+  if (entries.length === 0) {
+    const result = await pool.query(`SELECT * FROM teams WHERE id = $1`, [teamId])
+    return result.rows[0] as Team
+  }
 
   const setClause = entries.map(([key], i) => `${key} = $${i + 1}`).join(', ')
   const values = [...entries.map(([, v]) => v), teamId]
 
-  const team = await queryOne(
+  const result = await pool.query(
     `UPDATE teams SET ${setClause}, updated_at = NOW() WHERE id = $${values.length} RETURNING *`,
     values
   )
-  if (!team) throw new Error('Failed to update team')
-  return team as Team
+  if (!result.rows[0]) throw new Error('Failed to update team')
+  return result.rows[0] as Team
 }
 
-// Delete a team
 export async function deleteTeam(teamId: string) {
-  await queryOne(`DELETE FROM teams WHERE id = $1`, [teamId])
+  await pool.query(`DELETE FROM teams WHERE id = $1`, [teamId])
 }
 
-// Add a member to a team
 export async function addTeamMember(
   teamId: string,
   userId: string,
   orgId: string,
   roleId?: string
 ) {
-  const member = await queryOne(
+  const result = await pool.query(
     `INSERT INTO team_members (team_id, org_id, user_id, role_id)
      VALUES ($1, $2, $3, $4)
      RETURNING *`,
     [teamId, orgId, userId, roleId || null]
   )
-  if (!member) throw new Error('Failed to add team member')
-  return member as TeamMember
+  if (!result.rows[0]) throw new Error('Failed to add team member')
+  return result.rows[0] as TeamMember
 }
 
-// Remove a member from a team
 export async function removeTeamMember(teamMemberId: string) {
-  await queryOne(`DELETE FROM team_members WHERE id = $1`, [teamMemberId])
+  await pool.query(`DELETE FROM team_members WHERE id = $1`, [teamMemberId])
 }
 
-// Update team member role
 export async function updateTeamMemberRole(
   teamMemberId: string,
   roleId: string | null
 ) {
-  const member = await queryOne(
+  const result = await pool.query(
     `UPDATE team_members SET role_id = $1 WHERE id = $2 RETURNING *`,
     [roleId, teamMemberId]
   )
-  if (!member) throw new Error('Failed to update team member role')
-  return member as TeamMember
+  if (!result.rows[0]) throw new Error('Failed to update team member role')
+  return result.rows[0] as TeamMember
 }
 
-// Get team members count
 export async function getTeamMembersCount(teamId: string) {
-  const result = await queryOne(
+  const result = await pool.query(
     `SELECT COUNT(*) as count FROM team_members WHERE team_id = $1`,
     [teamId]
   )
-  return result?.count || 0
+  return result.rows[0]?.count || 0
 }

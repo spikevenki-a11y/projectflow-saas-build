@@ -3,7 +3,6 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { AlertCircle, Loader2 } from 'lucide-react'
@@ -16,7 +15,6 @@ export default function SignUpPage() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const router = useRouter()
-  const supabase = createClient()
 
   const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -24,27 +22,22 @@ export default function SignUpPage() {
     setLoading(true)
 
     try {
-      const { error: signUpError } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          emailRedirectTo:
-            process.env.NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL ??
-            `${window.location.origin}/auth/callback`,
-          data: {
-            first_name: firstName,
-            last_name: lastName,
-          },
-        },
+      const res = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password, firstName, lastName }),
       })
 
-      if (signUpError) {
-        setError(signUpError.message)
+      const data = await res.json()
+
+      if (!res.ok) {
+        setError(data.error || 'Registration failed')
         return
       }
 
-      router.push('/auth/sign-up-success')
-    } catch (err) {
+      router.push('/dashboard')
+      router.refresh()
+    } catch {
       setError('An unexpected error occurred')
     } finally {
       setLoading(false)

@@ -1,7 +1,6 @@
 'use client'
 
 import { useState } from 'react'
-import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { AlertCircle, Loader2 } from 'lucide-react'
@@ -18,7 +17,6 @@ export function CreateOrgDialog({ open, onOpenChange, onSuccess }: CreateOrgDial
   const [description, setDescription] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
-  const supabase = createClient()
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -26,16 +24,16 @@ export function CreateOrgDialog({ open, onOpenChange, onSuccess }: CreateOrgDial
     setLoading(true)
 
     try {
-      const { error: insertError } = await supabase.from('organizations').insert([
-        {
-          name,
-          slug,
-          description: description || null,
-        },
-      ])
+      const res = await fetch('/api/organizations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, slug, description: description || null }),
+      })
 
-      if (insertError) {
-        setError(insertError.message)
+      const data = await res.json()
+
+      if (!res.ok) {
+        setError(data.error || 'Failed to create organization')
         return
       }
 

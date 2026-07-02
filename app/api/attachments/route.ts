@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
 import { getTaskAttachments, getCommentAttachments, deleteAttachment } from '@/lib/attachments'
 import { del } from '@vercel/blob'
 
@@ -10,10 +9,7 @@ export async function GET(req: NextRequest) {
     const commentId = searchParams.get('commentId')
 
     if (!taskId && !commentId) {
-      return NextResponse.json(
-        { error: 'Missing taskId or commentId' },
-        { status: 400 }
-      )
+      return NextResponse.json({ error: 'Missing taskId or commentId' }, { status: 400 })
     }
 
     if (taskId) {
@@ -27,10 +23,7 @@ export async function GET(req: NextRequest) {
     }
   } catch (error) {
     console.error('[v0] Fetch attachments error:', error)
-    return NextResponse.json(
-      { error: 'Failed to fetch attachments' },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: 'Failed to fetch attachments' }, { status: 500 })
   }
 }
 
@@ -39,16 +32,11 @@ export async function DELETE(req: NextRequest) {
     const { attachmentId } = await req.json()
 
     if (!attachmentId) {
-      return NextResponse.json(
-        { error: 'Missing attachmentId' },
-        { status: 400 }
-      )
+      return NextResponse.json({ error: 'Missing attachmentId' }, { status: 400 })
     }
 
-    // Delete attachment and get blob pathname
     const blobPathname = await deleteAttachment(attachmentId)
 
-    // Delete from Blob storage
     if (blobPathname) {
       await del(blobPathname)
     }
@@ -56,9 +44,6 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ success: true })
   } catch (error) {
     console.error('[v0] Delete attachment error:', error)
-    return NextResponse.json(
-      { error: 'Failed to delete attachment' },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: 'Failed to delete attachment' }, { status: 500 })
   }
 }

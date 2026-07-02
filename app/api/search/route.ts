@@ -1,17 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { verifyToken, AUTH_COOKIE } from '@/lib/auth'
 import { searchTasks, getTaskSuggestions } from '@/lib/search'
-import { createClient } from '@/lib/supabase/server'
-import { queryOne } from '@/lib/db'
+import pool from '@/lib/db'
 
 export async function GET(request: NextRequest) {
   try {
-    const supabase = await createClient()
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser()
+    const token = request.cookies.get(AUTH_COOKIE)?.value
+    const user = token ? await verifyToken(token) : null
 
-    if (authError || !user) {
+    if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
@@ -20,33 +17,24 @@ export async function GET(request: NextRequest) {
     const type = searchParams.get('type') || 'search'
     const limit = parseInt(searchParams.get('limit') || '10')
     const offset = parseInt(searchParams.get('offset') || '0')
-    const projectId = searchParams.get('projectId') || undefined
 
-    // Get user's organization
-    const orgData = await queryOne(
+    const { rows } = await pool.query(
       `SELECT org_id FROM organization_members WHERE user_id = $1 LIMIT 1`,
       [user.id]
     )
 
-    if (!orgData) {
-      return NextResponse.json(
-        { error: 'No organization found' },
-        { status: 404 }
-      )
+    if (!rows[0]) {
+      return NextResponse.json({ error: 'No organization found' }, { status: 404 })
     }
 
-    const orgId = orgData.org_id
+    const orgId = rows[0].org_id
 
     if (type === 'suggestions') {
       const suggestions = await getTaskSuggestions(orgId, query, limit)
       return NextResponse.json({ suggestions })
     }
 
-    const result = await searchTasks(orgId, query, {
-      limit,
-      offset,
-    })
-
+    const result = await searchTasks(orgId, query, { limit, offset })
     return NextResponse.json(result)
   } catch (error) {
     console.error('[v0] Search error:', error)

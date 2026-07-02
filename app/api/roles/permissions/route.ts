@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { verifyToken, AUTH_COOKIE } from '@/lib/auth'
 import { addPermission, removePermission, getPermissions } from '@/lib/roles'
 
 export async function GET(request: NextRequest) {
@@ -8,29 +8,21 @@ export async function GET(request: NextRequest) {
     const roleId = searchParams.get('roleId')
 
     if (!roleId) {
-      return NextResponse.json(
-        { error: 'Role ID is required' },
-        { status: 400 }
-      )
+      return NextResponse.json({ error: 'Role ID is required' }, { status: 400 })
     }
 
     const permissions = await getPermissions(roleId)
     return NextResponse.json(permissions)
   } catch (error) {
     console.error('[v0] Get permissions error:', error)
-    return NextResponse.json(
-      { error: 'Failed to fetch permissions' },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: 'Failed to fetch permissions' }, { status: 500 })
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const supabase = await createClient()
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const token = request.cookies.get(AUTH_COOKIE)?.value
+    const user = token ? await verifyToken(token) : null
 
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -49,19 +41,14 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(permission, { status: 201 })
   } catch (error) {
     console.error('[v0] Add permission error:', error)
-    return NextResponse.json(
-      { error: 'Failed to add permission' },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: 'Failed to add permission' }, { status: 500 })
   }
 }
 
 export async function DELETE(request: NextRequest) {
   try {
-    const supabase = await createClient()
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const token = request.cookies.get(AUTH_COOKIE)?.value
+    const user = token ? await verifyToken(token) : null
 
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -71,19 +58,13 @@ export async function DELETE(request: NextRequest) {
     const permissionId = searchParams.get('id')
 
     if (!permissionId) {
-      return NextResponse.json(
-        { error: 'Permission ID is required' },
-        { status: 400 }
-      )
+      return NextResponse.json({ error: 'Permission ID is required' }, { status: 400 })
     }
 
     await removePermission(permissionId)
     return NextResponse.json({ success: true })
   } catch (error) {
     console.error('[v0] Remove permission error:', error)
-    return NextResponse.json(
-      { error: 'Failed to remove permission' },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: 'Failed to remove permission' }, { status: 500 })
   }
 }

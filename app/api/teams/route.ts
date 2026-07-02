@@ -1,11 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
-import {
-  getTeamsByOrg,
-  createTeam,
-  updateTeam,
-  deleteTeam,
-} from '@/lib/teams'
+import { verifyToken, AUTH_COOKIE } from '@/lib/auth'
+import { getTeamsByOrg, createTeam, updateTeam, deleteTeam } from '@/lib/teams'
 
 export async function GET(request: NextRequest) {
   try {
@@ -13,29 +8,21 @@ export async function GET(request: NextRequest) {
     const orgId = searchParams.get('orgId')
 
     if (!orgId) {
-      return NextResponse.json(
-        { error: 'Organization ID is required' },
-        { status: 400 }
-      )
+      return NextResponse.json({ error: 'Organization ID is required' }, { status: 400 })
     }
 
     const teams = await getTeamsByOrg(orgId)
     return NextResponse.json(teams)
   } catch (error) {
     console.error('[v0] Teams GET error:', error)
-    return NextResponse.json(
-      { error: 'Failed to fetch teams' },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: 'Failed to fetch teams' }, { status: 500 })
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const supabase = await createClient()
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const token = request.cookies.get(AUTH_COOKIE)?.value
+    const user = token ? await verifyToken(token) : null
 
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -50,23 +37,18 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const team = await createTeam(orgId, { name, description, color })
+    const team = await createTeam(orgId, { name, description, color }, user.id)
     return NextResponse.json(team, { status: 201 })
   } catch (error) {
     console.error('[v0] Teams POST error:', error)
-    return NextResponse.json(
-      { error: 'Failed to create team' },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: 'Failed to create team' }, { status: 500 })
   }
 }
 
 export async function PUT(request: NextRequest) {
   try {
-    const supabase = await createClient()
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const token = request.cookies.get(AUTH_COOKIE)?.value
+    const user = token ? await verifyToken(token) : null
 
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -75,29 +57,21 @@ export async function PUT(request: NextRequest) {
     const { teamId, name, description, color } = await request.json()
 
     if (!teamId) {
-      return NextResponse.json(
-        { error: 'Team ID is required' },
-        { status: 400 }
-      )
+      return NextResponse.json({ error: 'Team ID is required' }, { status: 400 })
     }
 
     const team = await updateTeam(teamId, { name, description, color })
     return NextResponse.json(team)
   } catch (error) {
     console.error('[v0] Teams PUT error:', error)
-    return NextResponse.json(
-      { error: 'Failed to update team' },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: 'Failed to update team' }, { status: 500 })
   }
 }
 
 export async function DELETE(request: NextRequest) {
   try {
-    const supabase = await createClient()
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const token = request.cookies.get(AUTH_COOKIE)?.value
+    const user = token ? await verifyToken(token) : null
 
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -107,19 +81,13 @@ export async function DELETE(request: NextRequest) {
     const teamId = searchParams.get('teamId')
 
     if (!teamId) {
-      return NextResponse.json(
-        { error: 'Team ID is required' },
-        { status: 400 }
-      )
+      return NextResponse.json({ error: 'Team ID is required' }, { status: 400 })
     }
 
     await deleteTeam(teamId)
     return NextResponse.json({ success: true })
   } catch (error) {
     console.error('[v0] Teams DELETE error:', error)
-    return NextResponse.json(
-      { error: 'Failed to delete team' },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: 'Failed to delete team' }, { status: 500 })
   }
 }

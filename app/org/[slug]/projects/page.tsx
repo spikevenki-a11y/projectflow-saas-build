@@ -18,13 +18,11 @@ export default function ProjectsPage() {
   // Get org ID from slug
   useEffect(() => {
     const fetchOrgId = async () => {
-      const supabase = (await import('@/lib/supabase/client')).createClient()
-      const { data } = await supabase
-        .from('organizations')
-        .select('id')
-        .eq('slug', slug)
-        .single()
-      if (data) setOrgId(data.id)
+      const res = await fetch(`/api/organizations/${slug}`)
+      if (res.ok) {
+        const data = await res.json()
+        setOrgId(data.id)
+      }
     }
     if (slug) fetchOrgId()
   }, [slug])

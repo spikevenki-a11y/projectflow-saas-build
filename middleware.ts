@@ -1,20 +1,28 @@
-import { updateSession } from '@/lib/supabase/proxy'
-import { type NextRequest } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
+import { verifyToken, AUTH_COOKIE } from '@/lib/auth'
+
+const PROTECTED_PREFIXES = ['/dashboard', '/org']
 
 export async function middleware(request: NextRequest) {
-  return await updateSession(request)
+  const { pathname } = request.nextUrl
+
+  const requiresAuth = PROTECTED_PREFIXES.some((prefix) => pathname.startsWith(prefix))
+  if (!requiresAuth) return NextResponse.next()
+
+  const token = request.cookies.get(AUTH_COOKIE)?.value
+  const user = token ? await verifyToken(token) : null
+
+  if (!user) {
+    const loginUrl = request.nextUrl.clone()
+    loginUrl.pathname = '/auth/login'
+    return NextResponse.redirect(loginUrl)
+  }
+
+  return NextResponse.next()
 }
 
 export const config = {
   matcher: [
-    /*
-     * Match all request paths except:
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
-     * - favicon.ico (favicon file)
-     * - images - .svg, .png, .jpg, .jpeg, .gif, .webp
-     * Feel free to modify this pattern to include more paths.
-     */
     '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
 }

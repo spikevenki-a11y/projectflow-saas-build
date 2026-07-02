@@ -2,9 +2,8 @@
 
 import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
-import { Plus, Settings, Users } from 'lucide-react'
+import { Plus, Users } from 'lucide-react'
 import Link from 'next/link'
 
 interface Organization {
@@ -32,34 +31,19 @@ export default function OrgPage() {
   const [org, setOrg] = useState<Organization | null>(null)
   const [members, setMembers] = useState<OrganizationMember[]>([])
   const [loading, setLoading] = useState(true)
-  const supabase = createClient()
 
   useEffect(() => {
     const fetchOrgData = async () => {
       if (!slug) return
 
       try {
-        // Fetch organization
-        const { data: orgData } = await supabase
-          .from('organizations')
-          .select('*')
-          .eq('slug', slug)
-          .single()
+        const res = await fetch(`/api/organizations/${slug}`)
+        if (!res.ok) return
 
-        if (orgData) {
-          setOrg(orgData)
-
-          // Fetch members
-          const { data: membersData } = await supabase
-            .from('organization_members')
-            .select('*, profiles:user_id(first_name, last_name, avatar_url)')
-            .eq('org_id', orgData.id)
-            .order('joined_at', { ascending: false })
-
-          if (membersData) {
-            setMembers(membersData)
-          }
-        }
+        const data = await res.json()
+        const { members: memberList, ...orgData } = data
+        setOrg(orgData)
+        setMembers(memberList ?? [])
       } catch (err) {
         console.error('Error fetching org data:', err)
       } finally {

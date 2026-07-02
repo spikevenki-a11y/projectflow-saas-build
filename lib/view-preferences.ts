@@ -1,5 +1,4 @@
-import { createClient } from '@/lib/supabase/server'
-import { queryOne } from '@/lib/db'
+import pool from '@/lib/db'
 
 export type ViewType = 'list' | 'board' | 'calendar'
 export type SortBy = 'created_at' | 'due_date' | 'priority' | 'status'
@@ -17,38 +16,25 @@ export interface ViewPreference {
   updated_at: string
 }
 
-/**
- * Get view preferences for a project
- */
 export async function getViewPreference(
   orgId: string,
+  userId: string,
   projectId: string | null = null
 ): Promise<ViewPreference | null> {
-  const supabase = await createClient()
-  const { data: { user }, error: userError } = await supabase.auth.getUser()
-  if (userError || !user) throw userError
-
-  const data = await queryOne(
-    `SELECT * FROM view_preferences 
+  const result = await pool.query(
+    `SELECT * FROM view_preferences
      WHERE org_id = $1 AND user_id = $2 AND project_id IS NOT DISTINCT FROM $3`,
-    [orgId, user.id, projectId]
+    [orgId, userId, projectId]
   )
-
-  return data as ViewPreference | null
+  return (result.rows[0] as ViewPreference) || null
 }
 
-/**
- * Save or update view preferences
- */
 export async function saveViewPreference(
   orgId: string,
+  userId: string,
   preference: Partial<ViewPreference> & { project_id?: string | null }
 ): Promise<ViewPreference> {
-  const supabase = await createClient()
-  const { data: { user }, error: userError } = await supabase.auth.getUser()
-  if (userError || !user) throw userError
-
-  const data = await queryOne(
+  const result = await pool.query(
     `INSERT INTO view_preferences (org_id, user_id, project_id, view_type, sort_by, sort_order, filters, updated_at)
      VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
      ON CONFLICT(org_id, user_id, project_id) DO UPDATE SET
@@ -60,7 +46,7 @@ export async function saveViewPreference(
      RETURNING *`,
     [
       orgId,
-      user.id,
+      userId,
       preference.project_id || null,
       preference.view_type || 'list',
       preference.sort_by || 'created_at',
@@ -69,14 +55,10 @@ export async function saveViewPreference(
     ]
   )
 
-  if (!data) throw new Error('Failed to save view preference')
-
-  return data as ViewPreference
+  if (!result.rows[0]) throw new Error('Failed to save view preference')
+  return result.rows[0] as ViewPreference
 }
 
-/**
- * Get default view preferences
- */
 export function getDefaultViewPreference(): Partial<ViewPreference> {
   return {
     view_type: 'list',

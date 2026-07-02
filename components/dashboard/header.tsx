@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
 import { NotificationBell } from './notification-bell'
 import { User } from 'lucide-react'
 
@@ -17,35 +16,21 @@ export function Header() {
   const slug = params?.slug as string
   const [orgId, setOrgId] = useState<string | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
-  const supabase = createClient()
 
   useEffect(() => {
     const fetchData = async () => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
-
-      if (user?.id) {
-        const { data: profileData } = await supabase
-          .from('profiles')
-          .select('first_name, last_name, avatar_url')
-          .eq('id', user.id)
-          .single()
-
-        if (profileData) {
-          setProfile(profileData)
-        }
+      // Fetch current user profile
+      const profileRes = await fetch('/api/profile')
+      if (profileRes.ok) {
+        const profileData = await profileRes.json()
+        setProfile(profileData)
       }
 
       // Get org ID from slug
       if (slug) {
-        const { data: orgData } = await supabase
-          .from('organizations')
-          .select('id')
-          .eq('slug', slug)
-          .single()
-
-        if (orgData) {
+        const orgRes = await fetch(`/api/organizations/${slug}`)
+        if (orgRes.ok) {
+          const orgData = await orgRes.json()
           setOrgId(orgData.id)
         }
       }

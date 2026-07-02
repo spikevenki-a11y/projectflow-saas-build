@@ -1,15 +1,14 @@
 import { ReactNode } from 'react'
 import { redirect } from 'next/navigation'
-import { createClient } from '@/lib/supabase/server'
+import { cookies } from 'next/headers'
+import { verifyToken, AUTH_COOKIE } from '@/lib/auth'
 import { Sidebar } from '@/components/dashboard/sidebar'
 import { Header } from '@/components/dashboard/header'
 
 export default async function DashboardLayout({ children }: { children: ReactNode }) {
-  const supabase = await createClient()
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const cookieStore = await cookies()
+  const token = cookieStore.get(AUTH_COOKIE)?.value
+  const user = token ? await verifyToken(token) : null
 
   if (!user) {
     redirect('/auth/login')

@@ -1,4 +1,4 @@
-import { queryRows } from '@/lib/db'
+import pool from '@/lib/db'
 import { Task } from '@/lib/tasks'
 
 export interface SearchResult {
@@ -53,7 +53,7 @@ export async function searchTasks(
     paramIndex++
   }
 
-  const data = await queryRows(
+  const data = await pool(
     `SELECT * FROM tasks 
      WHERE ${whereClause}
      ORDER BY updated_at DESC
@@ -62,7 +62,7 @@ export async function searchTasks(
   )
 
   // Get total count
-  const countResult = await queryRows(
+  const countResult = await pool(
     `SELECT COUNT(*) as total FROM tasks WHERE ${whereClause}`,
     params
   )
@@ -85,7 +85,7 @@ export async function getTaskSuggestions(
     return []
   }
 
-  const data = await queryRows(
+  const data = await pool(
     `SELECT id, title FROM tasks 
      WHERE org_id = $1 AND title ILIKE $2
      ORDER BY created_at DESC
@@ -103,7 +103,7 @@ export async function getPopularSearches(
   orgId: string,
   limit: number = 5
 ): Promise<string[]> {
-  const data = await queryRows(
+  const data = await pool(
     `SELECT title FROM tasks 
      WHERE org_id = $1
      ORDER BY created_at DESC

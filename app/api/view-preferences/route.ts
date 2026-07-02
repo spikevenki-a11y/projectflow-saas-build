@@ -1,38 +1,30 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { verifyToken, AUTH_COOKIE } from '@/lib/auth'
 import { saveViewPreference, getViewPreference } from '@/lib/view-preferences'
-import { createClient } from '@/lib/supabase/server'
-import { queryOne } from '@/lib/db'
+import pool from '@/lib/db'
 
 export async function GET(request: NextRequest) {
   try {
-    const supabase = await createClient()
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser()
+    const token = request.cookies.get(AUTH_COOKIE)?.value
+    const user = token ? await verifyToken(token) : null
 
-    if (authError || !user) {
+    if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     const searchParams = request.nextUrl.searchParams
     const projectId = searchParams.get('projectId')
 
-    // Get user's organization
-    const orgData = await queryOne(
+    const { rows } = await pool.query(
       `SELECT org_id FROM organization_members WHERE user_id = $1 LIMIT 1`,
       [user.id]
     )
 
-    if (!orgData) {
-      return NextResponse.json(
-        { error: 'No organization found' },
-        { status: 404 }
-      )
+    if (!rows[0]) {
+      return NextResponse.json({ error: 'No organization found' }, { status: 404 })
     }
 
-    const preference = await getViewPreference(orgData.org_id, projectId)
-
+    const preference = await getViewPreference(rows[0].org_id, user.id, projectId)
     return NextResponse.json(preference || {})
   } catch (error) {
     console.error('[v0] View preferences fetch error:', error)
@@ -42,33 +34,24 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const supabase = await createClient()
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser()
+    const token = request.cookies.get(AUTH_COOKIE)?.value
+    const user = token ? await verifyToken(token) : null
 
-    if (authError || !user) {
+    if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    // Get user's organization
-    const orgData = await queryOne(
+    const { rows } = await pool.query(
       `SELECT org_id FROM organization_members WHERE user_id = $1 LIMIT 1`,
       [user.id]
     )
 
-    if (!orgData) {
-      return NextResponse.json(
-        { error: 'No organization found' },
-        { status: 404 }
-      )
+    if (!rows[0]) {
+      return NextResponse.json({ error: 'No organization found' }, { status: 404 })
     }
 
     const body = await request.json()
-
-    const preference = await saveViewPreference(orgData.org_id, body)
-
+    const preference = await saveViewPreference(rows[0].org_id, user.id, body)
     return NextResponse.json(preference)
   } catch (error) {
     console.error('[v0] View preferences save error:', error)

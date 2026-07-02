@@ -1,5 +1,4 @@
-import { createClient } from '@/lib/supabase/server'
-import { queryOne, queryRows } from '@/lib/db'
+import pool from '@/lib/db'
 
 export interface Role {
   id: string
@@ -20,7 +19,7 @@ export interface Permission {
 
 // Get all roles for an organization
 export async function getRolesByOrg(orgId: string) {
-  const rows = await queryRows(
+  const rows = await pool(
     `SELECT * FROM roles 
      WHERE org_id = $1 
      ORDER BY is_default DESC, created_at DESC`,
@@ -31,10 +30,10 @@ export async function getRolesByOrg(orgId: string) {
 
 // Get a single role with its permissions
 export async function getRoleWithPermissions(roleId: string) {
-  const role = await queryOne(`SELECT * FROM roles WHERE id = $1`, [roleId])
+  const role = await pool(`SELECT * FROM roles WHERE id = $1`, [roleId])
   if (!role) return null
 
-  const permissions = await queryRows(
+  const permissions = await pool(
     `SELECT * FROM role_permissions WHERE role_id = $1`,
     [roleId]
   )
@@ -47,7 +46,7 @@ export async function createRole(
   orgId: string,
   data: { name: string; description?: string }
 ) {
-  const role = await queryOne(
+  const role = await pool(
     `INSERT INTO roles (org_id, name, description, is_default)
      VALUES ($1, $2, $3, $4)
      RETURNING *`,
@@ -63,12 +62,12 @@ export async function updateRole(
   data: { name?: string; description?: string }
 ) {
   const entries = Object.entries(data)
-  if (entries.length === 0) return queryOne(`SELECT * FROM roles WHERE id = $1`, [roleId])
+  if (entries.length === 0) return pool(`SELECT * FROM roles WHERE id = $1`, [roleId])
 
   const setClause = entries.map(([key], i) => `${key} = $${i + 1}`).join(', ')
   const values = [...entries.map(([, v]) => v), roleId]
 
-  const role = await queryOne(
+  const role = await pool(
     `UPDATE roles SET ${setClause} WHERE id = $${values.length} RETURNING *`,
     values
   )
@@ -78,7 +77,7 @@ export async function updateRole(
 
 // Delete a role (non-default only)
 export async function deleteRole(roleId: string) {
-  await queryOne(`DELETE FROM roles WHERE id = $1 AND is_default = FALSE`, [roleId])
+  await pool(`DELETE FROM roles WHERE id = $1 AND is_default = FALSE`, [roleId])
 }
 
 // Add a permission to a role
@@ -87,7 +86,7 @@ export async function addPermission(
   resource: Permission['resource'],
   action: Permission['action']
 ) {
-  const perm = await queryOne(
+  const perm = await pool(
     `INSERT INTO role_permissions (role_id, resource, action)
      VALUES ($1, $2, $3)
      RETURNING *`,
@@ -99,12 +98,12 @@ export async function addPermission(
 
 // Remove a permission from a role
 export async function removePermission(permissionId: string) {
-  await queryOne(`DELETE FROM role_permissions WHERE id = $1`, [permissionId])
+  await pool(`DELETE FROM role_permissions WHERE id = $1`, [permissionId])
 }
 
 // Get permissions for a role
 export async function getPermissions(roleId: string) {
-  const rows = await queryRows(
+  const rows = await pool(
     `SELECT * FROM role_permissions WHERE role_id = $1`,
     [roleId]
   )
@@ -118,10 +117,8 @@ export async function userHasPermission(
   resource: Permission['resource'],
   action: Permission['action']
 ) {
-  const supabase = await createClient()
-
   // Get org member role
-  const orgMember = await queryOne(
+  const orgMember = await pool(
     `SELECT role FROM organization_members 
      WHERE user_id = $1 AND org_id = $2`,
     [userId, orgId]
@@ -133,7 +130,7 @@ export async function userHasPermission(
   if (orgMember.role === 'owner' || orgMember.role === 'admin') return true
 
   // Check role permissions
-  const perm = await queryOne(
+  const perm = await pool(
     `SELECT * FROM role_permissions 
      WHERE resource = $1 AND action = $2`,
     [resource, action]

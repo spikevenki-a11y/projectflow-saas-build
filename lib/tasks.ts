@@ -1,5 +1,4 @@
-import { createClient } from '@/lib/supabase/server'
-import { queryOne, queryRows } from '@/lib/db'
+import pool from '@/lib/db'
 
 export interface Task {
   id: string
@@ -18,22 +17,22 @@ export interface Task {
 }
 
 export async function getTasks(projectId: string, orgId: string) {
-  const rows = await queryRows(
-    `SELECT * FROM tasks 
+  const result = await pool.query(
+    `SELECT * FROM tasks
      WHERE project_id = $1 AND org_id = $2
      ORDER BY order_index ASC`,
     [projectId, orgId]
   )
-  return rows as Task[]
+  return result.rows as Task[]
 }
 
 export async function getTask(taskId: string, orgId: string) {
-  const row = await queryOne(
+  const result = await pool.query(
     `SELECT * FROM tasks WHERE id = $1 AND org_id = $2`,
     [taskId, orgId]
   )
-  if (!row) throw new Error('Task not found')
-  return row as Task
+  if (!result.rows[0]) throw new Error('Task not found')
+  return result.rows[0] as Task
 }
 
 export async function createTask(
@@ -45,24 +44,16 @@ export async function createTask(
     priority?: 'low' | 'medium' | 'high' | 'urgent'
     assigned_to?: string
     due_date?: string
-  }
+  },
+  userId: string
 ) {
-  const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-
-  if (!user) throw new Error('Not authenticated')
-
-  // Get the max order_index for the project
-  const maxRow = await queryOne(
+  const maxResult = await pool.query(
     `SELECT MAX(order_index) as max_index FROM tasks WHERE project_id = $1`,
     [projectId]
   )
+  const orderIndex = (maxResult.rows[0]?.max_index || 0) + 1
 
-  const orderIndex = (maxRow?.max_index || 0) + 1
-
-  const row = await queryOne(
+  const result = await pool.query(
     `INSERT INTO tasks (project_id, org_id, title, description, priority, assigned_to, due_date, order_index, created_by)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
      RETURNING *`,
@@ -75,12 +66,12 @@ export async function createTask(
       data.assigned_to || null,
       data.due_date || null,
       orderIndex,
-      user.id,
+      userId,
     ]
   )
 
-  if (!row) throw new Error('Failed to create task')
-  return row as Task
+  if (!result.rows[0]) throw new Error('Failed to create task')
+  return result.rows[0] as Task
 }
 
 export async function updateTask(
@@ -108,31 +99,31 @@ export async function updateTask(
   const values = entries.map(([, value]) => value)
   values.push(taskId, orgId)
 
-  const row = await queryOne(
-    `UPDATE tasks 
+  const result = await pool.query(
+    `UPDATE tasks
      SET ${setClause}, updated_at = NOW()
      WHERE id = $${values.length - 1} AND org_id = $${values.length}
      RETURNING *`,
     values
   )
 
-  if (!row) throw new Error('Failed to update task')
-  return row as Task
+  if (!result.rows[0]) throw new Error('Failed to update task')
+  return result.rows[0] as Task
 }
 
 export async function deleteTask(taskId: string, orgId: string) {
-  await queryOne(
+  await pool.query(
     `DELETE FROM tasks WHERE id = $1 AND org_id = $2`,
     [taskId, orgId]
   )
 }
 
 export async function getTaskHistory(taskId: string, orgId: string) {
-  const rows = await queryRows(
+  const result = await pool.query(
     `SELECT * FROM audit_logs
      WHERE resource_id = $1 AND org_id = $2 AND resource_type = 'task'
      ORDER BY created_at DESC`,
     [taskId, orgId]
   )
-  return rows
+  return result.rows
 }
